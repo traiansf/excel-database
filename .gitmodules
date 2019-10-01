@@ -1,0 +1,3 @@
+[submodule "spout"]
+	path = spout
+	url = http://github.com/box/spout
