@@ -19,10 +19,8 @@ Installing from source
 ----------------------
 
 ```
-git clone http://github.com/traiansf/excel-database
-cd excel-database
-git submodule update --init
+git clone --recurse-submodules http://github.com/traiansf/excel-database
 ```
 
-The `excel-database` directory needs to be placed into
+The thus obtained `excel-database` directory needs to be placed into
 `wp-content/plugins/` from the root of your Wordpress installation.
