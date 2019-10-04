@@ -39,7 +39,10 @@ if ( is_admin() ){ // admin actions
 add_filter( 'query_vars', 'excel_database_add_query' );
 function excel_database_add_query( $vars )
 {
-    $vars[] = 'project';
+    $vars[] = 'item';
+    $vars[] = 'search';
+    $vars[] = 'query';
+    $vars[] = 'start';
     return $vars;
 }
 
@@ -48,8 +51,13 @@ function excel_database_rewrite_rule() {
     $page_id = get_option('excel_database_page_id');
     if ($page !== false && $page_id !== false) {
         add_rewrite_rule(
-            '^'.urlencode($page).'/?([^/]*)/?',
-            'index.php?page_id='.$page_id.'&project=$matches[1]',
+            '^'.urlencode($page).'/item/([^/]*)/?',
+            'index.php?page_id='.$page_id.'&item=$matches[1]',
+            'top'
+        );
+        add_rewrite_rule(
+            '^'.urlencode($page).'/search/query=([^/&]*)(&start=([^/]*))?/?',
+            'index.php?page_id='.$page_id.'&search=1&query=$matches[1]&start=$matches[3]',
             'top'
         );
         flush_rewrite_rules();
@@ -68,14 +76,26 @@ function excel_database_shortcode( $atts ){
 
 
     $out = "";
-    $project = get_query_var( 'project' );
+    $project = get_query_var( 'item' );
+    $search = get_query_var( 'search' );
+    $query = get_query_var( 'query' );
+    $start = get_query_var( 'start' );
+    if (isset($search) && !empty($search)) {
+        $out .= "<p>Searching for $query starting at $start</p>";
+    }
     $count = 0;
     $single = isset($project) && !empty($project);
+    $template_id = -1;
     if ($single) {
         $count = get_option('excel_database_full');
+        $template_id = get_option('excel_database_template_page_id');
         $out .= "<p><a href='$page_url'>Back to $page.</a></p>";
     } else {
         $count = get_option('excel_database_summary');
+        $template_id = get_option('excel_database_short_template_page_id');
+    }
+    if ($count == 0) {
+        $template = get_post($template_id);
     }
     $fieldcount = 0;
     $reader = ReaderEntityFactory::createReaderFromFile($db_file);
@@ -131,41 +151,66 @@ function excel_database_shortcode( $atts ){
 
     wp_enqueue_script('jquery','',array('json2'));
     wp_enqueue_script('excel-database-js', '', array('jquery'));
-    
 
+
+    /*
     if (!$single) {
         echo '<div class="entries-search">';
-        echo '    <input type="text" name="input-filter" class=form-control id="input-filter" placeholder="Search Here">';
+        echo '    <input type="text" name="input-filter" class=form-control id="input-filter" placeholder="Filter results">';
         echo '</div>';
     }
+     */
     foreach ($entries as $key => $current) {
         $out .= "<dl class='excel_database_row' id='excel_database_$key'>";
         if (!$single) {
-            $href = '<a href="'.get_site_url(null,'/'.urlencode($page).'/'.urlencode($key)).'">';
+            $href = get_site_url(null,'/'.urlencode($page).'/item/'.urlencode($key));
         }
-        for ($i = 0; $i < $count; $i++) {
-            $hkey = $headrow[$i];
-            $value = isset($current[$hkey]) ? $current[$hkey] : null;
-            $desc = $description[$hkey];
-            if (!empty($value)) {
-                if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
-                    $href = '<a href="mailto:'.$value.'">';
-                } else if (filter_var($value, FILTER_VALIDATE_URL)) {
-                    $href = '<a href="'.$value.'">';
+        if ($count != 0) {
+            for ($i = 0; $i < $count; $i++) {
+                $hkey = $headrow[$i];
+                $value = excel_database_get_value($current, $hkey, isset($href) ? $href : null);
+                $desc = $description[$hkey];
+                if (!empty($value)) {
+                    $out .= "<dt>".$desc."</dt>";
+                    $out .= "<dd>";
+                    $out .= $value;
+                    $out .= "</dd>";
                 }
-                $out .= "<dt>".$desc."</dt>";
-                $out .= "<dd>";
-                if (isset($href)) $out .= $href;
-                $out .= $value;
-                if (isset($href)) $out .= '</a>';
-                $out .= "</dd>";
+                unset($href);
             }
-            unset($href);
+        } else {
+            $instance = $template->post_content;
+            for ($i = 0; $i < $fieldcount; $i++) {
+                $hkey = $headrow[$i];
+                $value = excel_database_get_value($current, $hkey);
+                if (!empty($value)) {
+                    $instance = str_replace('{{'.$hkey.'}}', $value, $instance);
+                }
+            }
+            if (!empty($href)) {
+                $href = substr($href,strlen("http://"));
+                $instance = str_replace('{{href}}', $href, $instance);
+            }
+            $out .= apply_filters( 'the_content', $instance );
+
         }
         $out .= '<hr style="    max-width: 100%;"/>';
         $out .= "</dl>";
     }
     return $out;
+}
+
+function excel_database_get_value(& $current, $hkey, $href = null) {
+    $value = isset($current[$hkey]) ? $current[$hkey] : null;
+    if (!empty($value)) {
+        if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
+            $value = '<a href="mailto:'.$value.'">'.$value.'</a>';
+        } else if (filter_var($value, FILTER_VALIDATE_URL)) {
+            $value = '<a href="'.$value.'">'.$value.'</a>';
+        }
+        if (isset($href)) $value = '<a href="'.$href.'">'.$value.'</a>';
+    }
+    return $value;
 }
 
 
@@ -182,6 +227,8 @@ add_filter( 'the_title', 'excel_database_filter_the_title' );
 
 function register_excel_database_settings() { // whitelist options
     register_setting( 'excel-database-option-group', 'excel_database_page_id' );
+    register_setting( 'excel-database-option-group', 'excel_database_template_page_id' );
+    register_setting( 'excel-database-option-group', 'excel_database_short_template_page_id' );
     register_setting( 'excel-database-option-group', 'excel_database_url' );
     register_setting( 'excel-database-option-group', 'excel_database_page' );
     register_setting( 'excel-database-option-group', 'excel_database_primary' );
@@ -190,6 +237,8 @@ function register_excel_database_settings() { // whitelist options
 
     // get the value of the setting we've registered with register_setting()
     $page_id = get_option('excel_database_page_id');
+    $template_page_id = get_option('excel_database_template_page_id');
+    $short_template_page_id = get_option('excel_database_short_template_page_id');
 
     if ($page_id !== false) {
         $post = get_post($page_id);
@@ -198,20 +247,44 @@ function register_excel_database_settings() { // whitelist options
     } 
 
     $page = get_option('excel_database_page');
-    if ($page !== false && $page_id === false) {
-        // Create post object
+    if ($page !== false) {
         $my_post = array(
             'post_title'    => ucfirst($page),
-            'post_type'      => 'page',
-            'post_content'  => '[excel_database]',
+            'post_type'     => 'page',
+            'post_content'  => '',
             'post_status'   => 'publish',
             'post_author'   => 1,
         );
-        $page_id = wp_insert_post($my_post, true);
-        if (is_wp_error($page_id)) {
-            echo $page_id->get_error_message();
-        } else {
-            update_option('excel_database_page_id', $page_id);
+        if (empty($page_id)) {
+            $my_post['post_content'] = "[excel_database]";
+            $my_post['post_title'] = ucfirst($page);
+            // Create post object
+            $page_id = wp_insert_post($my_post, true);
+            if (is_wp_error($page_id)) {
+                echo $page_id->get_error_message();
+            } else {
+                update_option('excel_database_page_id', $page_id);
+            }
+        }
+        if (empty($short_template_page_id)) {
+            $my_post['post_content'] = "";
+            $my_post['post_title'] = ucfirst($page." short template");
+            $short_template_page_id = wp_insert_post($my_post, true);
+            if (is_wp_error($short_template_page_id)) {
+                echo $short_template_page_id->get_error_message();
+            } else {
+                update_option('excel_database_short_template_page_id', $short_template_page_id);
+            }
+        }
+        if (empty($template_page_id)) {
+            $my_post['post_content'] = "";
+            $my_post['post_title'] = ucfirst($page." template");
+            $template_page_id = wp_insert_post($my_post, true);
+            if (is_wp_error($template_page_id)) {
+                echo $template_page_id->get_error_message();
+            } else {
+                update_option('excel_database_template_page_id', $template_page_id);
+            }
         }
     }
 
@@ -278,13 +351,16 @@ function register_excel_database_settings() { // whitelist options
 function excel_database_settings_section_cb()
 {
     $page_id = get_option('excel_database_page_id');
-    $page = get_option('excel_database_page');
+    $template_page_id = get_option('excel_database_template_page_id');
+    $short_template_page_id = get_option('excel_database_short_template_page_id');
     /*
     echo '<p>'.$page.'<br/>'.$page_id.'</p>';
      */
 
-    if ($page !== false && $page_id !== false) {
-        echo '<p><a href="'.get_site_url(null,'/'.urlencode($page)).'">Customize database page</a></p>'; 
+    if ($page_id !== false) {
+        echo '<p><a href="'.get_site_url(null,'/wp-admin/post.php?post='.$page_id.'&action=edit').'">Customize main page</a></p>'; 
+        echo '<p><a href="'.get_site_url(null,'/wp-admin/post.php?post='.$template_page_id.'&action=edit').'">Customize template</a></p>'; 
+        echo '<p><a href="'.get_site_url(null,'/wp-admin/post.php?post='.$short_template_page_id.'&action=edit').'">Customize short template</a></p>'; 
     }
 }
 
