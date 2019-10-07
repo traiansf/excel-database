@@ -70,6 +70,8 @@ function excel_database_shortcode( $atts ){
     $db_url = get_option('excel_database_url');
     $primary_key_idx = get_option('excel_database_primary') - 1;
     $page = get_option('excel_database_page');
+    $items_on_page = get_option('excel_database_items_on_page');
+    if (empty($items_on_page)) $items_on_page = 10;
     $page_url = get_site_url(null,'/'.urlencode($page));
     $upload_dir = wp_upload_dir();
     $db_file = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $db_url);
@@ -79,17 +81,20 @@ function excel_database_shortcode( $atts ){
     $project = get_query_var( 'item' );
     $search = get_query_var( 'search' );
     $query = get_query_var( 'query' );
-    $start = get_query_var( 'start' );
-    if (isset($search) && !empty($search)) {
-        $out .= "<p>Searching for $query starting at $start</p>";
-    }
+    $page_no = get_query_var( 'start' );
+    //echo "Page No: '$page_no'";
+    if (empty($page_no) || $page_no <= 0) $page_no = 1;
+    $start = ($page_no - 1) * $items_on_page + 1;
+    //if (isset($search) && !empty($search)) {
+    //    $out .= "<p>Searching for $query starting at $start</p>";
+    //}
     $count = 0;
     $single = isset($project) && !empty($project);
     $template_id = -1;
     if ($single) {
         $count = get_option('excel_database_full');
         $template_id = get_option('excel_database_template_page_id');
-        $out .= "<p><a href='$page_url'>Back to $page.</a></p>";
+    //    $out .= "<p><a href='$page_url'>Back to $page.</a></p>";
     } else {
         $count = get_option('excel_database_summary');
         $template_id = get_option('excel_database_short_template_page_id');
@@ -98,13 +103,123 @@ function excel_database_shortcode( $atts ){
         $template = get_post($template_id);
     }
     $fieldcount = 0;
+    $headrow = array();
+    $description = array();
+    $entries = array();
+    $idx = 0;
+    $valid = function ($key, $current) use ($project, $start, & $idx, $query, $headrow, $items_on_page) {
+        if(isset($project) && !empty($project))
+            return $project == $key;
+        $notfound = true;
+        if (!empty($query)) {
+            foreach ($current as $field)
+                if (strpos($field, $query) !== false) {
+                    $notfound = false;
+                    break;
+                }
+            if ($notfound) return false;
+        }
+        $idx ++;
+        if(intval($idx) < intval($start) || intval($idx) >= intval($start)+$items_on_page) {
+            return false;
+        }
+
+        return true;
+    };
+    $fieldcount = excel_database_read($db_file, $primary_key_idx, $headrow, $description, $entries);
+    $entries = excel_database_query($valid, $entries);
+    $pages = ceil($idx / $items_on_page);
+    if ($pages < $page_no) $page_no = $pages + 1;
+    $navigation_links = excel_database_navigation_links($page_url, $query, $page_no, $items_on_page, $idx);
+    $out .= $navigation_links;
+    /*
+    $js_url = plugins_url('excel-database.js', __FILE__ );
+    wp_register_script('excel-database-js', $js_url);
+
+    wp_localize_script('excel-database-js', 'entries', $entries);
+
+    wp_enqueue_script('jquery','',array('json2'));
+    wp_enqueue_script('excel-database-js', '', array('jquery'));
+
+
+    if (!$single) {
+        echo '<div class="entries-search">';
+        echo '    <input type="text" name="input-filter" class=form-control id="input-filter" placeholder="Filter results">';
+        echo '</div>';
+    }
+     */
+    foreach ($entries as $key => $current) {
+        if (!$single) {
+            $href = get_site_url(null,'/'.urlencode($page).'/item/'.urlencode($key));
+        } else {
+            $href = null;
+        }
+        if ($count != 0) {
+            $out .= excel_database_default_format($headrow, $description, $fieldcount, $count, $current, $href);
+            $out .= '<hr style="    max-width: 100%;"/>';
+        } else {
+            $out .= excel_database_template_format($headrow, $fieldcount, $template->post_content, $current, $href);
+        }
+    }
+    $out .= $navigation_links;
+    return $out;
+}
+
+function excel_database_default_format($headrow, $description, $fieldcount, $count, $current, $href) {
+    $out = "<dl class='excel_database_row'>";
+    for ($i = 0; $i < $count; $i++) {
+        $hkey = $headrow[$i];
+        $value = excel_database_get_value($current, $hkey, isset($href) ? $href : null);
+        $desc = $description[$hkey];
+        if (!empty($value)) {
+            $out .= "<dt>".$desc."</dt>";
+            $out .= "<dd>";
+            $out .= $value;
+            $out .= "</dd>";
+        }
+        unset($href);
+    }
+    $out .= "</dl>";
+    return $out;
+}
+
+function excel_database_template_format($headrow, $fieldcount, $template, $current, $href) {
+    for ($i = 0; $i < $fieldcount; $i++) {
+        $hkey = $headrow[$i];
+        $value = excel_database_get_value($current, $hkey);
+        if (!empty($value)) {
+            $template = str_replace('{{'.$hkey.'}}', $value, $template);
+        }
+    }
+    if (!empty($href)) {
+        $href = substr($href,strlen("http://"));
+        $template = str_replace('{{href}}', $href, $template);
+    }
+    return apply_filters( 'the_content', $template );
+}
+
+function excel_database_navigation_links($page_url, $query, $page_no, $items_on_page, $idx) {
+    $out = "";
+    if ($idx <= $items_on_page) return $out;
+    $link = $page_url.'/search/query='.urlencode($query).'&start=';
+    if ($page_no > 1) {
+        $left = $page_no - 1;
+        $out .= '<a href="'.$link.urlencode($left).'">Previous</a> ';
+    }
+    $pages = ceil($idx / $items_on_page);
+    $out .= 'Page '.$page_no.' of '.$pages;
+    if ($page_no < $pages) {
+        $right = $page_no + 1;
+        $out .= ' <a href="'.$link.urlencode($right).'">Next</a>';
+    }
+    return '<p>'.$out.'</p>';
+}
+
+function excel_database_read($db_file, $primary_key_idx, & $headrow, & $description, & $entries) {
     $reader = ReaderEntityFactory::createReaderFromFile($db_file);
     $reader->open($db_file);
     foreach ($reader->getSheetIterator() as $sheet) {
         $rowc = 0;
-        $headrow = array();
-        $description = array();
-        $entries = array();
         foreach ($sheet->getRowIterator() as $row) {
             $current = array();
             foreach ($row->getCells() as $cell) {
@@ -124,9 +239,6 @@ function excel_database_shortcode( $atts ){
                 continue;
             }
             $primary_key = $current[$primary_key_idx];
-            if($single && $project != $primary_key)
-                continue;
-
             if (!isset($entries[$primary_key])) {
                 $entries[$primary_key] = array();
             }
@@ -143,61 +255,17 @@ function excel_database_shortcode( $atts ){
         break; // only reads first sheet
     }
     $reader->close();
+    return $fieldcount;
+}
 
-    $js_url = plugins_url('excel-database.js', __FILE__ );
-    wp_register_script('excel-database-js', $js_url);
-
-    wp_localize_script('excel-database-js', 'entries', $entries);
-
-    wp_enqueue_script('jquery','',array('json2'));
-    wp_enqueue_script('excel-database-js', '', array('jquery'));
-
-
-    /*
-    if (!$single) {
-        echo '<div class="entries-search">';
-        echo '    <input type="text" name="input-filter" class=form-control id="input-filter" placeholder="Filter results">';
-        echo '</div>';
-    }
-     */
+function excel_database_query($validate, & $entries) {
+    $result = array();
     foreach ($entries as $key => $current) {
-        $out .= "<dl class='excel_database_row' id='excel_database_$key'>";
-        if (!$single) {
-            $href = get_site_url(null,'/'.urlencode($page).'/item/'.urlencode($key));
+        if ($validate($key, $current)) {
+            $result[$key] = $current;
         }
-        if ($count != 0) {
-            for ($i = 0; $i < $count; $i++) {
-                $hkey = $headrow[$i];
-                $value = excel_database_get_value($current, $hkey, isset($href) ? $href : null);
-                $desc = $description[$hkey];
-                if (!empty($value)) {
-                    $out .= "<dt>".$desc."</dt>";
-                    $out .= "<dd>";
-                    $out .= $value;
-                    $out .= "</dd>";
-                }
-                unset($href);
-            }
-        } else {
-            $instance = $template->post_content;
-            for ($i = 0; $i < $fieldcount; $i++) {
-                $hkey = $headrow[$i];
-                $value = excel_database_get_value($current, $hkey);
-                if (!empty($value)) {
-                    $instance = str_replace('{{'.$hkey.'}}', $value, $instance);
-                }
-            }
-            if (!empty($href)) {
-                $href = substr($href,strlen("http://"));
-                $instance = str_replace('{{href}}', $href, $instance);
-            }
-            $out .= apply_filters( 'the_content', $instance );
-
-        }
-        $out .= '<hr style="    max-width: 100%;"/>';
-        $out .= "</dl>";
     }
-    return $out;
+    return $result;
 }
 
 function excel_database_get_value(& $current, $hkey, $href = null) {
@@ -234,6 +302,7 @@ function register_excel_database_settings() { // whitelist options
     register_setting( 'excel-database-option-group', 'excel_database_primary' );
     register_setting( 'excel-database-option-group', 'excel_database_summary' );
     register_setting( 'excel-database-option-group', 'excel_database_full' );
+    register_setting( 'excel-database-option-group', 'excel_database_items_on_page' );
 
     // get the value of the setting we've registered with register_setting()
     $page_id = get_option('excel_database_page_id');
@@ -341,6 +410,44 @@ function register_excel_database_settings() { // whitelist options
         'excel_database_settings_section'
     );
 
+    // register a new field in the section, inside the "group" page
+    add_settings_field(
+        'excel_database_settings_items_on_page_field',
+        'Excel Database number of item to display per page',
+        'excel_database_settings_items_on_page_field_cb',
+        'excel-database-option-group',
+        'excel_database_settings_section'
+    );
+
+    // register a new field in the section, inside the "group" page
+    add_settings_field(
+        'excel_database_settings_page_id_field',
+        'Excel Database Main Page id',
+        'excel_database_settings_page_id_field_cb',
+        'excel-database-option-group',
+        'excel_database_settings_section'
+    );
+
+
+    // register a new field in the section, inside the "group" page
+    add_settings_field(
+        'excel_database_settings_template_page_id_field',
+        'Excel Database Template Page id',
+        'excel_database_settings_template_page_id_field_cb',
+        'excel-database-option-group',
+        'excel_database_settings_section'
+    );
+
+    // register a new field in the section, inside the "group" page
+    add_settings_field(
+        'excel_database_settings_short_template_page_id_field',
+        'Excel Database Short Template Page id',
+        'excel_database_settings_short_template_page_id_field_cb',
+        'excel-database-option-group',
+        'excel_database_settings_section'
+    );
+
+
 }
 
 /**
@@ -408,6 +515,46 @@ function excel_database_settings_full_field_cb()
     // output the field
     echo '<input type="number" name="excel_database_full" value="'.(isset( $setting ) ? esc_attr( $setting ) : '').'">';
 }
+
+
+// field content cb
+function excel_database_settings_items_on_page_field_cb()
+{
+    // get the value of the setting we've registered with register_setting()
+    $setting = get_option('excel_database_items_on_page');
+    // output the field
+    echo '<input type="number" name="excel_database_items_on_page" value="'.(isset( $setting ) ? esc_attr( $setting ) : '').'">';
+}
+
+// field content cb
+function excel_database_settings_page_id_field_cb()
+{
+    // get the value of the setting we've registered with register_setting()
+    $setting = get_option('excel_database_page_id');
+    // output the field
+    echo '<input type="number" name="excel_database_page_id" value="'.(isset( $setting ) ? esc_attr( $setting ) : '').'">';
+}
+
+
+// field content cb
+function excel_database_settings_template_page_id_field_cb()
+{
+    // get the value of the setting we've registered with register_setting()
+    $setting = get_option('excel_database_template_page_id');
+    // output the field
+    echo '<input type="number" name="excel_database_template_page_id" value="'.(isset( $setting ) ? esc_attr( $setting ) : '').'">';
+}
+
+// field content cb
+function excel_database_settings_short_template_page_id_field_cb()
+{
+    // get the value of the setting we've registered with register_setting()
+    $setting = get_option('excel_database_short_template_page_id');
+    // output the field
+    echo '<input type="number" name="excel_database_short_template_page_id" value="'.(isset( $setting ) ? esc_attr( $setting ) : '').'">';
+}
+
+
 
 /** Step 1. */
 function excel_database_menu() {
