@@ -66,7 +66,6 @@ function excel_database_rewrite_rule() {
 
 //[foobar]
 function excel_database_shortcode( $atts ){
-
     $db_url = get_option('excel_database_url');
     $primary_key_idx = get_option('excel_database_primary') - 1;
     $page = get_option('excel_database_page');
@@ -77,11 +76,23 @@ function excel_database_shortcode( $atts ){
     $db_file = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $db_url);
 
 
-    $out = "";
     $project = get_query_var( 'item' );
     $search = get_query_var( 'search' );
     $query = get_query_var( 'query' );
     $page_no = get_query_var( 'start' );
+    $search_form =  '<form role="search" method="get" id="excel_database_search"'."\n\t".
+                'class="search-form" action="'.$page_url.'">'."\n\t".
+            '<label>'."\n\t\t".
+                '<span class="screen-reader-text">Search for:</span>'."\n\t\t".
+                '<input type="search" class="search-field" placeholder="Search …" value="" name="query"/>'."\n\t".
+                '<input type="hidden" value="1" name="search"/>'."\n\t".
+            '</label>'."\n\t".
+            '<input type="submit" class="search-submit"'."\n\t\t".
+                'value="Search database" />'."\n\t".
+            '</form>'."\n";
+    if (empty($search) && empty($project))
+        return $search_form;
+    $out = "";
     //echo "Page No: '$page_no'";
     if (empty($page_no) || $page_no <= 0) $page_no = 1;
     $start = ($page_no - 1) * $items_on_page + 1;
