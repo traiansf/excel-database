@@ -31,6 +31,7 @@ use Box\Spout\Reader\Common\Creator\ReaderEntityFactory;
 
 add_action( 'init', 'excel_database_rewrite_rule');
 add_shortcode( 'excel_database', 'excel_database_shortcode' );
+add_shortcode( 'excel_database_search', 'excel_database_search_shortcode' );
 if ( is_admin() ){ // admin actions
     add_action( 'admin_menu', 'excel_database_menu' );
     add_action( 'admin_init', 'register_excel_database_settings' );
@@ -43,8 +44,36 @@ function excel_database_add_query( $vars )
     $vars[] = 'search';
     $vars[] = 'query';
     $vars[] = 'start';
+    $keys = excel_database_get_keys();
+    $prefixed_keys = array_map('add_query_key_prefix', $keys);
+    $vars = array_merge($vars, $prefixed_keys);
     return $vars;
 }
+
+function add_query_key_prefix($key) {
+    return "ed_".$key;
+}
+
+function excel_database_get_keys() {
+    $db_url = get_option('excel_database_url');
+    if (empty($db_url)) return;
+    $upload_dir = wp_upload_dir();
+    $db_file = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $db_url);
+    $reader = ReaderEntityFactory::createReaderFromFile($db_file);
+    $reader->open($db_file);
+    $current = array();
+    foreach ($reader->getSheetIterator() as $sheet) {
+        foreach ($sheet->getRowIterator() as $row) {
+            foreach ($row->getCells() as $cell) {
+                $current[] = $cell->getValue();
+            }
+            break;
+        }
+        break;
+    }
+    $reader->close();
+    return $current;
+ }
 
 function excel_database_rewrite_rule() {
     $page = get_option('excel_database_page');
@@ -64,6 +93,22 @@ function excel_database_rewrite_rule() {
     }
 }
 
+function excel_database_search_shortcode( $atts ){
+    $page = get_option('excel_database_page');
+    $page_url = get_site_url(null,'/'.urlencode($page));
+    $search_form =  '<form role="search" method="get" id="excel_database_search"'."\n\t".
+                'class="search-form" action="'.$page_url.'">'."\n\t".
+            '<label>'."\n\t\t".
+                '<span class="screen-reader-text">Search for:</span>'."\n\t\t".
+                '<input type="search" class="search-field" placeholder="Search …" value="" name="query"/>'."\n\t".
+                '<input type="hidden" value="1" name="search"/>'."\n\t".
+            '</label>'."\n\t".
+            '<input type="submit" class="search-submit"'."\n\t\t".
+                'value="Search database" />'."\n\t".
+            '</form>'."\n";
+    return $search_form;
+}
+
 //[foobar]
 function excel_database_shortcode( $atts ){
     $db_url = get_option('excel_database_url');
@@ -80,18 +125,8 @@ function excel_database_shortcode( $atts ){
     $search = get_query_var( 'search' );
     $query = get_query_var( 'query' );
     $page_no = get_query_var( 'start' );
-    $search_form =  '<form role="search" method="get" id="excel_database_search"'."\n\t".
-                'class="search-form" action="'.$page_url.'">'."\n\t".
-            '<label>'."\n\t\t".
-                '<span class="screen-reader-text">Search for:</span>'."\n\t\t".
-                '<input type="search" class="search-field" placeholder="Search …" value="" name="query"/>'."\n\t".
-                '<input type="hidden" value="1" name="search"/>'."\n\t".
-            '</label>'."\n\t".
-            '<input type="submit" class="search-submit"'."\n\t\t".
-                'value="Search database" />'."\n\t".
-            '</form>'."\n";
     if (empty($search) && empty($project))
-        return $search_form;
+        return "";
     $out = "";
     //echo "Page No: '$page_no'";
     if (empty($page_no) || $page_no <= 0) $page_no = 1;
@@ -124,7 +159,7 @@ function excel_database_shortcode( $atts ){
         $notfound = true;
         if (!empty($query)) {
             foreach ($current as $field)
-                if (strpos($field, $query) !== false) {
+                if (strpos(strtolower($field), strtolower($query)) !== false) {
                     $notfound = false;
                     break;
                 }
@@ -143,22 +178,6 @@ function excel_database_shortcode( $atts ){
     if ($pages < $page_no) $page_no = $pages + 1;
     $navigation_links = excel_database_navigation_links($page_url, $query, $page_no, $items_on_page, $idx);
     $out .= $navigation_links;
-    /*
-    $js_url = plugins_url('excel-database.js', __FILE__ );
-    wp_register_script('excel-database-js', $js_url);
-
-    wp_localize_script('excel-database-js', 'entries', $entries);
-
-    wp_enqueue_script('jquery','',array('json2'));
-    wp_enqueue_script('excel-database-js', '', array('jquery'));
-
-
-    if (!$single) {
-        echo '<div class="entries-search">';
-        echo '    <input type="text" name="input-filter" class=form-control id="input-filter" placeholder="Filter results">';
-        echo '</div>';
-    }
-     */
     foreach ($entries as $key => $current) {
         if (!$single) {
             $href = get_site_url(null,'/'.urlencode($page).'/item/'.urlencode($key));
@@ -336,7 +355,7 @@ function register_excel_database_settings() { // whitelist options
             'post_author'   => 1,
         );
         if (empty($page_id)) {
-            $my_post['post_content'] = "[excel_database]";
+            $my_post['post_content'] = "[excel_database_search]\n\n[excel_database]";
             $my_post['post_title'] = ucfirst($page);
             // Create post object
             $page_id = wp_insert_post($my_post, true);
