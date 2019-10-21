@@ -10,3 +10,10 @@ excel-database/spout: spout/src spout/LICENSE spout/README.md
 	rm -rf excel-database/spout
 	mkdir excel-database/spout
 	cp -R $^ excel-database/spout
+
+
+clean:
+	rm -rf excel-database
+	rm excel-database.zip
+
+.PHONY: clean

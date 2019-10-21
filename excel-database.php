@@ -32,6 +32,7 @@ use Box\Spout\Reader\Common\Creator\ReaderEntityFactory;
 add_action( 'init', 'excel_database_rewrite_rule');
 add_shortcode( 'excel_database', 'excel_database_shortcode' );
 add_shortcode( 'excel_database_search', 'excel_database_search_shortcode' );
+add_shortcode( 'excel_database_extended_search', 'excel_database_extended_search_shortcode' );
 if ( is_admin() ){ // admin actions
     add_action( 'admin_menu', 'excel_database_menu' );
     add_action( 'admin_init', 'register_excel_database_settings' );
@@ -44,7 +45,8 @@ function excel_database_add_query( $vars )
     $vars[] = 'search';
     $vars[] = 'query';
     $vars[] = 'start';
-    $keys = excel_database_get_keys();
+    $keys = array();
+    excel_database_read_keys($keys);
     $prefixed_keys = array_map('add_query_key_prefix', $keys);
     $vars = array_merge($vars, $prefixed_keys);
     return $vars;
@@ -53,27 +55,6 @@ function excel_database_add_query( $vars )
 function add_query_key_prefix($key) {
     return "ed_".$key;
 }
-
-function excel_database_get_keys() {
-    $db_url = get_option('excel_database_url');
-    if (empty($db_url)) return;
-    $upload_dir = wp_upload_dir();
-    $db_file = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $db_url);
-    $reader = ReaderEntityFactory::createReaderFromFile($db_file);
-    $reader->open($db_file);
-    $current = array();
-    foreach ($reader->getSheetIterator() as $sheet) {
-        foreach ($sheet->getRowIterator() as $row) {
-            foreach ($row->getCells() as $cell) {
-                $current[] = $cell->getValue();
-            }
-            break;
-        }
-        break;
-    }
-    $reader->close();
-    return $current;
- }
 
 function excel_database_rewrite_rule() {
     $page = get_option('excel_database_page');
@@ -109,16 +90,40 @@ function excel_database_search_shortcode( $atts ){
     return $search_form;
 }
 
+function excel_database_extended_search_shortcode( $atts ){
+    $keys = array(); $description = array();
+    $count = excel_database_read_keys_description(&$keys, &$description);
+    $page = get_option('excel_database_page');
+    $page_url = get_site_url(null,'/'.urlencode($page));
+    $search_form =  '<form role="search" method="get" id="excel_database_extended_search"'."\n\t".
+        'class="search-form" action="'.$page_url.'">'."\n\t".
+        excel_database_search_form($keys, $description, $count).
+        '</form>'."\n";
+    return $search_form;
+}
+
+function excel_database_search_form($headrow, $description, $count) {
+    $out = "<dl class='excel_database_row'>";
+    for ($i = 0; $i < $count; $i++) {
+        $hkey = $headrow[$i];
+        $desc = $description[$hkey];
+	$out .= "<dt>".$desc."</dt>";
+	$out .= "<dd>";
+        $out .= '<input type="search" class="search-field" value="" name="'.add_query_key_prefix($hkey).'"/>'."\n\t".
+	$out .= "</dd>";
+    }
+    $out .= "</dl>";
+    return $out;
+}
+
+
 //[foobar]
 function excel_database_shortcode( $atts ){
-    $db_url = get_option('excel_database_url');
     $primary_key_idx = get_option('excel_database_primary') - 1;
     $page = get_option('excel_database_page');
     $items_on_page = get_option('excel_database_items_on_page');
     if (empty($items_on_page)) $items_on_page = 10;
     $page_url = get_site_url(null,'/'.urlencode($page));
-    $upload_dir = wp_upload_dir();
-    $db_file = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $db_url);
 
 
     $project = get_query_var( 'item' );
@@ -172,7 +177,7 @@ function excel_database_shortcode( $atts ){
 
         return true;
     };
-    $fieldcount = excel_database_read($db_file, $primary_key_idx, $headrow, $description, $entries);
+    $fieldcount = excel_database_read($primary_key_idx, $headrow, $description, $entries);
     $entries = excel_database_query($valid, $entries);
     $pages = ceil($idx / $items_on_page);
     if ($pages < $page_no) $page_no = $pages + 1;
@@ -245,9 +250,18 @@ function excel_database_navigation_links($page_url, $query, $page_no, $items_on_
     return '<p>'.$out.'</p>';
 }
 
-function excel_database_read($db_file, $primary_key_idx, & $headrow, & $description, & $entries) {
+function open_database() {
+    $db_url = get_option('excel_database_url');
+    if (empty($db_url)) return;
+    $upload_dir = wp_upload_dir();
+    $db_file = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $db_url);
     $reader = ReaderEntityFactory::createReaderFromFile($db_file);
     $reader->open($db_file);
+    return $reader;
+}
+
+function excel_database_read($primary_key_idx, & $headrow, & $description, & $entries) {
+    $reader = open_database();
     foreach ($reader->getSheetIterator() as $sheet) {
         $rowc = 0;
         foreach ($sheet->getRowIterator() as $row) {
@@ -257,15 +271,18 @@ function excel_database_read($db_file, $primary_key_idx, & $headrow, & $descript
             }
             if ($rowc == 0) {
                 $headrow = $current;
+                for ($i = 0; !empty($headrow[$i]); $i++);
+                $fieldcount = $i;
                 $rowc = 1;
+                if ($primary_key_idx === -1) break;
                 continue;
             }
             if ($rowc == 1) {
-                for ($i = 0; !empty($headrow[$i]); $i++) {
+                for ($i = 0; $i < $fieldcount; $i++) {
                     $description[$headrow[$i]] = $current[$i];
                 }
-                $fieldcount = $i;
                 $rowc = 2;
+                if ($primary_key_idx === -2) break;
                 continue;
             }
             $primary_key = $current[$primary_key_idx];
@@ -286,6 +303,17 @@ function excel_database_read($db_file, $primary_key_idx, & $headrow, & $descript
     }
     $reader->close();
     return $fieldcount;
+}
+
+function excel_database_read_keys(&$keys) {
+    $description = array();
+    $entries = array();
+    return excel_database_read(-1, $keys, $description, $entries);
+}
+
+function excel_database_read_keys_description(&$keys, &$description) {
+    $entries = array();
+    return excel_database_read(-2, $keys, $description, $entries);
 }
 
 function excel_database_query($validate, & $entries) {
