@@ -217,9 +217,8 @@ function excel_database_template_format($headrow, $fieldcount, $template, $curre
     for ($i = 0; $i < $fieldcount; $i++) {
         $hkey = $headrow[$i];
         $value = excel_database_get_value($current, $hkey);
-        if (!empty($value)) {
-            $template = str_replace('{{'.$hkey.'}}', $value, $template);
-        }
+        if (empty($value)) $value = '-';
+        $template = str_replace('{{'.$hkey.'}}', $value, $template);
     }
     if (!empty($href)) {
         $href = substr($href,strlen("http://"));
