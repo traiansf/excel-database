@@ -32,6 +32,7 @@ use Box\Spout\Reader\Common\Creator\ReaderEntityFactory;
 add_action( 'init', 'excel_database_rewrite_rule');
 add_shortcode( 'excel_database', 'excel_database_shortcode' );
 add_shortcode( 'excel_database_search', 'excel_database_search_shortcode' );
+add_shortcode( 'excel_database_advanced_search', 'excel_database_advanced_search_shortcode' );
 if ( is_admin() ){ // admin actions
     add_action( 'admin_menu', 'excel_database_menu' );
     add_action( 'admin_init', 'register_excel_database_settings' );
@@ -42,9 +43,11 @@ function excel_database_add_query( $vars )
 {
     $vars[] = 'item';
     $vars[] = 'search';
+    $vars[] = 'advanced_search';
     $vars[] = 'query';
     $vars[] = 'start';
-    $keys = excel_database_get_keys();
+    $keys = array();
+    excel_database_read_keys($keys);
     $prefixed_keys = array_map('add_query_key_prefix', $keys);
     $vars = array_merge($vars, $prefixed_keys);
     return $vars;
@@ -53,27 +56,6 @@ function excel_database_add_query( $vars )
 function add_query_key_prefix($key) {
     return "ed_".$key;
 }
-
-function excel_database_get_keys() {
-    $db_url = get_option('excel_database_url');
-    if (empty($db_url)) return;
-    $upload_dir = wp_upload_dir();
-    $db_file = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $db_url);
-    $reader = ReaderEntityFactory::createReaderFromFile($db_file);
-    $reader->open($db_file);
-    $current = array();
-    foreach ($reader->getSheetIterator() as $sheet) {
-        foreach ($sheet->getRowIterator() as $row) {
-            foreach ($row->getCells() as $cell) {
-                $current[] = $cell->getValue();
-            }
-            break;
-        }
-        break;
-    }
-    $reader->close();
-    return $current;
- }
 
 function excel_database_rewrite_rule() {
     $page = get_option('excel_database_page');
@@ -109,23 +91,45 @@ function excel_database_search_shortcode( $atts ){
     return $search_form;
 }
 
+
+function excel_database_advanced_search_shortcode( $atts ){
+    $page = get_option('excel_database_page');
+    $page_url = get_site_url(null,'/'.urlencode($page));
+    $keys = array(); $description = array();
+    $fcount = excel_database_read_description($keys, $description);
+    $out =  '<form role="search" method="get" id="excel_database_advanced_search"'."\n\t".
+        'class="search-form" action="'.$page_url.'">'."\n\t";
+    $out .= "<dl class='excel_database_row'>";
+    foreach ($keys as $key) {
+        $desc = $description[$key];
+        $out .= "<dt>".$desc."</dt>";
+        $out .= "<dd>";
+        $out .= '<input type="search" class="search-field" placeholder="'.$key.'" value="" name="'.add_query_key_prefix($key).'"/>'."\n\t";
+        $out .= "</dd>";
+    }
+    $out .= "</dl>";
+    $out .=
+            '<input type="hidden" value="1" name="advanced_search"/>'."\n\t".
+            '<input type="submit" class="search-submit"'."\n\t\t".
+                'value="Search database" />'."\n\t".
+            '</form>'."\n";
+    return $out;
+}
+
 //[foobar]
 function excel_database_shortcode( $atts ){
-    $db_url = get_option('excel_database_url');
     $primary_key_idx = get_option('excel_database_primary') - 1;
     $page = get_option('excel_database_page');
     $items_on_page = get_option('excel_database_items_on_page');
     if (empty($items_on_page)) $items_on_page = 10;
     $page_url = get_site_url(null,'/'.urlencode($page));
-    $upload_dir = wp_upload_dir();
-    $db_file = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $db_url);
-
 
     $project = get_query_var( 'item' );
     $search = get_query_var( 'search' );
+    $advanced_search = get_query_var( 'advanced_search' );
     $query = get_query_var( 'query' );
     $page_no = get_query_var( 'start' );
-    if (empty($search) && empty($project))
+    if (empty($search) && empty($advanced_search) && empty($project))
         return "";
     $out = "";
     //echo "Page No: '$page_no'";
@@ -149,20 +153,39 @@ function excel_database_shortcode( $atts ){
         $template = get_post($template_id);
     }
     $fieldcount = 0;
-    $headrow = array();
+    $keys = array();
     $description = array();
     $entries = array();
     $idx = 0;
-    $valid = function ($key, $current) use ($project, $start, & $idx, $query, $headrow, $items_on_page) {
+    $fieldcount = excel_database_read($primary_key_idx, $keys, $description, $entries);
+    if ($advanced_search) {
+        $query = array();
+        foreach ($keys as $key) {
+            $q = get_query_var(add_query_key_prefix($key));
+            if (!empty($q)) {
+                $query[$key] = $q;
+            }
+        }
+    }
+    $valid = function ($key, $current) use ($project, $start, & $idx, $search, $query, $keys, $items_on_page) {
         if(isset($project) && !empty($project))
             return $project == $key;
-        $notfound = true;
         if (!empty($query)) {
-            foreach ($current as $field)
-                if (strpos(strtolower($field), strtolower($query)) !== false) {
-                    $notfound = false;
-                    break;
+            $notfound = true;
+            if (!empty($search)) {
+                foreach ($current as $field)
+                    if (strpos(strtolower($field), strtolower($query)) !== false) {
+                        $notfound = false;
+                        break;
+                    }
+            } else {//advanced search
+                foreach ($query as $key => $value) {
+                    if (strpos(strtolower($current[$key]), strtolower($value)) !== false) {
+                        $notfound = false;
+                        break;
+                    }
                 }
+            }
             if ($notfound) return false;
         }
         $idx ++;
@@ -172,7 +195,6 @@ function excel_database_shortcode( $atts ){
 
         return true;
     };
-    $fieldcount = excel_database_read($db_file, $primary_key_idx, $headrow, $description, $entries);
     $entries = excel_database_query($valid, $entries);
     $pages = ceil($idx / $items_on_page);
     if ($pages < $page_no) $page_no = $pages + 1;
@@ -185,20 +207,20 @@ function excel_database_shortcode( $atts ){
             $href = null;
         }
         if ($count != 0) {
-            $out .= excel_database_default_format($headrow, $description, $fieldcount, $count, $current, $href);
+            $out .= excel_database_default_format($keys, $description, $fieldcount, $count, $current, $href);
             $out .= '<hr style="    max-width: 100%;"/>';
         } else {
-            $out .= excel_database_template_format($headrow, $fieldcount, $template->post_content, $current, $href);
+            $out .= excel_database_template_format($keys, $fieldcount, $template->post_content, $current, $href);
         }
     }
     $out .= $navigation_links;
     return $out;
 }
 
-function excel_database_default_format($headrow, $description, $fieldcount, $count, $current, $href) {
+function excel_database_default_format($keys, $description, $fieldcount, $count, $current, $href) {
     $out = "<dl class='excel_database_row'>";
     for ($i = 0; $i < $count; $i++) {
-        $hkey = $headrow[$i];
+        $hkey = $keys[$i];
         $value = excel_database_get_value($current, $hkey, isset($href) ? $href : null);
         $desc = $description[$hkey];
         if (!empty($value)) {
@@ -213,9 +235,9 @@ function excel_database_default_format($headrow, $description, $fieldcount, $cou
     return $out;
 }
 
-function excel_database_template_format($headrow, $fieldcount, $template, $current, $href) {
+function excel_database_template_format($keys, $fieldcount, $template, $current, $href) {
     for ($i = 0; $i < $fieldcount; $i++) {
-        $hkey = $headrow[$i];
+        $hkey = $keys[$i];
         $value = excel_database_get_value($current, $hkey);
         if (empty($value)) $value = '-';
         $template = str_replace('{{'.$hkey.'}}', $value, $template);
@@ -244,7 +266,22 @@ function excel_database_navigation_links($page_url, $query, $page_no, $items_on_
     return '<p>'.$out.'</p>';
 }
 
-function excel_database_read($db_file, $primary_key_idx, & $headrow, & $description, & $entries) {
+function excel_database_read_keys(& $keys) {
+    $description = array();
+    $entries = array();
+    return excel_database_read(-1, $keys, $description, $entries);
+}
+
+function excel_database_read_description(& $keys, & $description) {
+    $entries = array();
+    return excel_database_read(-2, $keys, $description, $entries);
+}
+
+function excel_database_read($primary_key_idx, & $keys, & $description, & $entries) {
+    $upload_dir = wp_upload_dir();
+    $db_url = get_option('excel_database_url');
+    $db_file = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $db_url);
+
     $reader = ReaderEntityFactory::createReaderFromFile($db_file);
     $reader->open($db_file);
     foreach ($reader->getSheetIterator() as $sheet) {
@@ -255,15 +292,20 @@ function excel_database_read($db_file, $primary_key_idx, & $headrow, & $descript
                 $current[] = $cell->getValue();
             }
             if ($rowc == 0) {
-                $headrow = $current;
+                $keys = $current;
+                for ($fieldcount = 0; !empty($keys[$fieldcount]); $fieldcount++)
+                    ;
+                if ($primary_key_idx == -1)
+                    break;
                 $rowc = 1;
                 continue;
             }
             if ($rowc == 1) {
-                for ($i = 0; !empty($headrow[$i]); $i++) {
-                    $description[$headrow[$i]] = $current[$i];
+                for ($i = 0; !empty($keys[$i]); $i++) {
+                    $description[$keys[$i]] = $current[$i];
                 }
-                $fieldcount = $i;
+                if ($primary_key_idx == -2)
+                    break;
                 $rowc = 2;
                 continue;
             }
@@ -273,10 +315,10 @@ function excel_database_read($db_file, $primary_key_idx, & $headrow, & $descript
             }
             for ($i = 0; $i < $fieldcount; $i++) {
                 if (!empty($current[$i])) {
-                    if (empty($entries[$primary_key][$headrow[$i]])) {
-                        $entries[$primary_key][$headrow[$i]] = $current[$i];
-                    } else if (strpos(strval($entries[$primary_key][$headrow[$i]]), strval($current[$i])) === false) {
-                        $entries[$primary_key][$headrow[$i]] .= "; ".$current[$i];
+                    if (empty($entries[$primary_key][$keys[$i]])) {
+                        $entries[$primary_key][$keys[$i]] = $current[$i];
+                    } else if (strpos(strval($entries[$primary_key][$keys[$i]]), strval($current[$i])) === false) {
+                        $entries[$primary_key][$keys[$i]] .= "; ".$current[$i];
                     }
                 }
             }
