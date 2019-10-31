@@ -192,7 +192,6 @@ function excel_database_shortcode( $atts ){
         if(intval($idx) < intval($start) || intval($idx) >= intval($start)+$items_on_page) {
             return false;
         }
-
         return true;
     };
     $entries = excel_database_query($valid, $entries);
@@ -252,7 +251,15 @@ function excel_database_template_format($keys, $fieldcount, $template, $current,
 function excel_database_navigation_links($page_url, $query, $page_no, $items_on_page, $idx) {
     $out = "";
     if ($idx <= $items_on_page) return $out;
-    $link = $page_url.'/search/query='.urlencode($query).'&start=';
+    if (is_array($query)) {
+        $link = $page_url.'/?advanced_search=1';
+        foreach ($query as $key => $value) {
+            $link .= '&'.urlencode(add_query_key_prefix($key))."=".urlencode($value);
+        }
+    } else {
+	    $link = $page_url.'/search/query='.urlencode($query);
+    }
+    $link .= '&start=';
     if ($page_no > 1) {
         $left = $page_no - 1;
         $out .= '<a href="'.$link.urlencode($left).'">Previous</a> ';
