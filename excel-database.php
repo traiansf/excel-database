@@ -50,11 +50,6 @@ function excel_database_add_query( $vars )
     excel_database_read_keys($keys);
     $prefixed_keys = array_map('add_query_key_prefix', $keys);
     $vars = array_merge($vars, $prefixed_keys);
-    for ($i=0;  $i<10; $i++) {
-        $key = excel_database_extra_key($i);
-        $vars[] = $key;
-        $vars[] = $key.'_query';
-    }
     return $vars;
 }
 
@@ -80,41 +75,44 @@ function excel_database_rewrite_rule() {
     }
 }
 
-function excel_database_parse_extra_search_attributes($atts){
-    $label="label_";
-    $query="query_";
+function excel_database_extra_search_keys(){
     $result = array();
-    foreach ($atts as $key => $value) {
-        if (substr($key, 0, strlen($label)) === $label) {
-            $i = substr($key, strlen($label));
-            $query_value = $atts[$query.$i];
-            $result[$i] = array("label" => $value, "query" => $query_value);
+    for ($i=0;  $i<10; $i++) {
+        $key = excel_database_extra_key($i,"label");
+        $label = get_option( $key );
+        if (!empty($label)) {
+            $result[$i] = $label;
         }
     }
     return $result;
 }
 
-function excel_database_extra_key($i) {
-    return 'ed_extra_'.$i;
+function excel_database_extra_key($i,$tag) {
+    return 'excel_database_extra_search_'.$tag.'_'.$i;
+}
+
+function excel_database_extra_search_fields() {
+    $search_form = '<br/>';
+    $extras = excel_database_extra_search_keys();
+    foreach ($extras as $i => $label) {
+        $key = excel_database_extra_key($i, "checkbox");
+        $search_form .=
+            '<input type="checkbox" name="'.$key.'" id="'.$key.'">'."\n\t".
+            '<label for="'.$key.'">'.$label.'</label>'."\n\t<br/>";
+    }
+    return $search_form;
 }
 
 function excel_database_search_shortcode( $atts ){
     $page = get_option('excel_database_page');
     $page_url = get_site_url(null,'/'.urlencode($page));
-    $extras = excel_database_parse_extra_search_attributes($atts);
     $search_form =  '<form role="search" method="get" id="excel_database_search"'."\n\t".
                 'class="search-form" action="'.$page_url.'">'."\n\t".
             '<label>'."\n\t\t".
                 '<span class="screen-reader-text">Search for:</span>'."\n\t\t".
                 '<input type="search" class="search-field" placeholder="Search …" value="" name="query"/>'."\n\t".
             '</label>'."\n\t";
-    foreach ($extras as $i => $extra) {
-        $key = excel_database_extra_key($i);
-        $search_form .=
-            '<input type="checkbox" name="'.$key.'" id="'.$key.'">'."\n\t".
-            '<label for="'.$key.'">'.$extra["label"].'</label>'."\n\t".
-            '<input type="hidden" name="'.$key.'_query" value="'.$extra["query"].'" />'."\n\t";
-    }
+    $search_form .= excel_database_extra_search_fields();
     $search_form .= 
                 '<input type="hidden" value="1" name="search"/>'."\n\t".
             '<input type="submit" class="search-submit"'."\n\t\t".
@@ -140,6 +138,7 @@ function excel_database_advanced_search_shortcode( $atts ){
         $out .= "</dd>";
     }
     $out .= "</dl>";
+    $out .= excel_database_extra_search_fields();
     $out .=
             '<input type="hidden" value="1" name="advanced_search"/>'."\n\t".
             '<input type="submit" class="search-submit"'."\n\t\t".
@@ -413,6 +412,12 @@ function register_excel_database_settings() { // whitelist options
     register_setting( 'excel-database-option-group', 'excel_database_summary' );
     register_setting( 'excel-database-option-group', 'excel_database_full' );
     register_setting( 'excel-database-option-group', 'excel_database_items_on_page' );
+    for ($i=0;  $i<10; $i++) {
+        $key = excel_database_extra_key($i,"label");
+        register_setting( 'excel-database-option-group', $key );
+        $key = excel_database_extra_key($i,"query");
+        register_setting( 'excel-database-option-group', $key );
+    }
 
     // get the value of the setting we've registered with register_setting()
     $page_id = get_option('excel_database_page_id');
@@ -557,6 +562,21 @@ function register_excel_database_settings() { // whitelist options
         'excel_database_settings_section'
     );
 
+    for ($i=0;  $i<10; $i++) {
+        $key = excel_database_extra_key($i,"label");
+        add_settings_field($key.'_field', ucfirst(str_replace('_',' ',$key)),
+                excel_database_setings_field_cb($key),
+                'excel-database-option-group',
+                'excel_database_settings_section'
+                );
+        $key = excel_database_extra_key($i,"query");
+        add_settings_field($key.'_field', ucfirst(str_replace('_',' ',$key)),
+                excel_database_setings_field_cb($key),
+                'excel-database-option-group',
+                'excel_database_settings_section'
+                );
+    }
+
 
 }
 
@@ -597,6 +617,13 @@ function excel_database_settings_page_field_cb()
     $setting = get_option('excel_database_page');
     // output the field
     echo '<input type="text" name="excel_database_page" value="'.(isset( $setting ) ? esc_attr( $setting ) : '').'">';
+}
+
+function excel_database_setings_field_cb($key) {
+    $setting = get_option($key);
+    return function() use ($key, $setting) {
+        echo '<input type="text" name="'.$key.'" value="'.(isset( $setting ) ? esc_attr( $setting ) : '').'">';
+    };
 }
 
 // field content cb
