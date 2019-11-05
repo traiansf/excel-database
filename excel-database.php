@@ -77,7 +77,8 @@ function excel_database_rewrite_rule() {
 
 function excel_database_extra_search_keys(){
     $result = array();
-    for ($i=0;  $i<10; $i++) {
+    $extra_keys = get_option('excel_database_extra_search_keys');
+    for ($i=0;  $i<$extra_keys; $i++) {
         $key = excel_database_extra_key($i,"label");
         $label = get_option( $key );
         if (!empty($label)) {
@@ -412,7 +413,9 @@ function register_excel_database_settings() { // whitelist options
     register_setting( 'excel-database-option-group', 'excel_database_summary' );
     register_setting( 'excel-database-option-group', 'excel_database_full' );
     register_setting( 'excel-database-option-group', 'excel_database_items_on_page' );
-    for ($i=0;  $i<10; $i++) {
+    register_setting( 'excel-database-option-group', 'excel_database_extra_search_keys' );
+    $extra_keys = get_option('excel_database_extra_search_keys');
+    for ($i=0;  $i<$extra_keys; $i++) {
         $key = excel_database_extra_key($i,"label");
         register_setting( 'excel-database-option-group', $key );
         $key = excel_database_extra_key($i,"query");
@@ -562,7 +565,18 @@ function register_excel_database_settings() { // whitelist options
         'excel_database_settings_section'
     );
 
-    for ($i=0;  $i<10; $i++) {
+    // register a new field in the section, inside the "group" page
+    add_settings_field(
+        'excel_database_settings_extra_search_keys_field',
+        'Excel Database Number of Extra Searck Criteria',
+        'excel_database_settings_extra_search_keys_field_cb',
+        'excel-database-option-group',
+        'excel_database_settings_section'
+    );
+
+
+    $extra_keys = get_option('excel_database_extra_search_keys');
+    for ($i=0;  $i<$extra_keys; $i++) {
         $key = excel_database_extra_key($i,"label");
         add_settings_field($key.'_field', ucfirst(str_replace('_',' ',$key)),
                 excel_database_setings_field_cb($key),
@@ -689,6 +703,16 @@ function excel_database_settings_short_template_page_id_field_cb()
     $setting = get_option('excel_database_short_template_page_id');
     // output the field
     echo '<input type="number" name="excel_database_short_template_page_id" value="'.(isset( $setting ) ? esc_attr( $setting ) : '').'">';
+}
+
+
+// field content cb
+function excel_database_settings_extra_search_keys_field_cb()
+{
+    // get the value of the setting we've registered with register_setting()
+    $setting = get_option('excel_database_extra_search_keys');
+    // output the field
+    echo '<input type="number" name="excel_database_extra_search_keys" value="'.(isset( $setting ) ? esc_attr( $setting ) : '').'">';
 }
 
 
