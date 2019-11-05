@@ -50,6 +50,11 @@ function excel_database_add_query( $vars )
     excel_database_read_keys($keys);
     $prefixed_keys = array_map('add_query_key_prefix', $keys);
     $vars = array_merge($vars, $prefixed_keys);
+    for ($i=0;  $i<10; $i++) {
+        $key = excel_database_extra_key($i);
+        $vars[] = $key;
+        $vars[] = $key.'_query';
+    }
     return $vars;
 }
 
@@ -75,16 +80,43 @@ function excel_database_rewrite_rule() {
     }
 }
 
+function excel_database_parse_extra_search_attributes($atts){
+    $label="label_";
+    $query="query_";
+    $result = array();
+    foreach ($atts as $key => $value) {
+        if (substr($key, 0, strlen($label)) === $label) {
+            $i = substr($key, strlen($label));
+            $query_value = $atts[$query.$i];
+            $result[$i] = array("label" => $value, "query" => $query_value);
+        }
+    }
+    return $result;
+}
+
+function excel_database_extra_key($i) {
+    return 'ed_extra_'.$i;
+}
+
 function excel_database_search_shortcode( $atts ){
     $page = get_option('excel_database_page');
     $page_url = get_site_url(null,'/'.urlencode($page));
+    $extras = excel_database_parse_extra_search_attributes($atts);
     $search_form =  '<form role="search" method="get" id="excel_database_search"'."\n\t".
                 'class="search-form" action="'.$page_url.'">'."\n\t".
             '<label>'."\n\t\t".
                 '<span class="screen-reader-text">Search for:</span>'."\n\t\t".
                 '<input type="search" class="search-field" placeholder="Search …" value="" name="query"/>'."\n\t".
+            '</label>'."\n\t";
+    foreach ($extras as $i => $extra) {
+        $key = excel_database_extra_key($i);
+        $search_form .=
+            '<input type="checkbox" name="'.$key.'" id="'.$key.'">'."\n\t".
+            '<label for="'.$key.'">'.$extra["label"].'</label>'."\n\t".
+            '<input type="hidden" name="'.$key.'_query" value="'.$extra["query"].'" />'."\n\t";
+    }
+    $search_form .= 
                 '<input type="hidden" value="1" name="search"/>'."\n\t".
-            '</label>'."\n\t".
             '<input type="submit" class="search-submit"'."\n\t\t".
                 'value="Search database" />'."\n\t".
             '</form>'."\n";
