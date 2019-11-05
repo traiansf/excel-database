@@ -50,6 +50,11 @@ function excel_database_add_query( $vars )
     excel_database_read_keys($keys);
     $prefixed_keys = array_map('add_query_key_prefix', $keys);
     $vars = array_merge($vars, $prefixed_keys);
+    $extra_keys = get_option('excel_database_extra_search_keys');
+    for ($i=0;  $i<$extra_keys; $i++) {
+        $key = excel_database_extra_key($i, "checkbox");
+        $vars[] = $key;
+    }
     return $vars;
 }
 
@@ -83,6 +88,24 @@ function excel_database_extra_search_keys(){
         $label = get_option( $key );
         if (!empty($label)) {
             $result[$i] = $label;
+        }
+    }
+    return $result;
+}
+
+function excel_database_extra_search_queries(){
+    $result = "";
+    $extra_keys = get_option('excel_database_extra_search_keys');
+    for ($i=0;  $i<$extra_keys; $i++) {
+        $key = excel_database_extra_key($i, "checkbox");
+        $label = get_query_var( $key );
+        if (!empty($label)) {
+            $key = excel_database_extra_key($i,"query");
+            $query = get_option( $key );
+            if (!empty($result)) {
+                $result .= ' && ';
+            }
+            $result .= '('.$query.')';
         }
     }
     return $result;
@@ -161,6 +184,7 @@ function excel_database_shortcode( $atts ){
     $advanced_search = get_query_var( 'advanced_search' );
     $query = get_query_var( 'query' );
     $page_no = get_query_var( 'start' );
+    $extra_query =  excel_database_extra_search_queries();
     if (empty($search) && empty($advanced_search) && empty($project))
         return "";
     $out = "";
@@ -199,7 +223,8 @@ function excel_database_shortcode( $atts ){
             }
         }
     }
-    $valid = function ($key, $current) use ($project, $start, & $idx, $search, $query, $keys, $items_on_page) {
+    echo $extra_query;
+    $valid = function ($key, $current) use ($project, $start, & $idx, $search, $query, $extra_query, $keys, $items_on_page) {
         if(isset($project) && !empty($project))
             return $project == $key;
         if (!empty($query)) {
@@ -219,6 +244,18 @@ function excel_database_shortcode( $atts ){
                 }
             }
             if ($notfound) return false;
+        }
+        if (!empty($extra_query)) {
+            foreach ($current as $key => $value) {
+                $extra_query = str_replace('{{'.$key.'}}', "'".$value."'", $extra_query);
+            }
+            if (strpos($extra_query,'{{') !== FALSE) return false;
+            try {
+                if (!eval('return '.$extra_query.';')) return false;
+            } catch (Exception $e) {
+                echo 'Caught exception: ',  $e->getMessage(), "\n";
+                return false;
+            }
         }
         $idx ++;
         if(intval($idx) < intval($start) || intval($idx) >= intval($start)+$items_on_page) {
@@ -290,6 +327,14 @@ function excel_database_navigation_links($page_url, $query, $page_no, $items_on_
         }
     } else {
 	    $link = $page_url.'/search/query='.urlencode($query);
+    }
+    $extra_keys = get_option('excel_database_extra_search_keys');
+    for ($i=0;  $i<$extra_keys; $i++) {
+        $key = excel_database_extra_key($i, "checkbox");
+        $label = get_query_var( $key );
+        if (!empty($label)) {
+            $link .= '&'.$key.'=on';
+        }
     }
     $link .= '&start=';
     if ($page_no > 1) {
