@@ -71,11 +71,6 @@ function excel_database_rewrite_rule() {
             'index.php?page_id='.$page_id.'&item=$matches[1]',
             'top'
         );
-        add_rewrite_rule(
-            '^'.urlencode($page).'/search/query=([^/&]*)(&start=([^/]*))?/?',
-            'index.php?page_id='.$page_id.'&search=1&query=$matches[1]&start=$matches[3]',
-            'top'
-        );
         flush_rewrite_rules();
     }
 }
@@ -223,7 +218,7 @@ function excel_database_shortcode( $atts ){
             }
         }
     }
-    echo $extra_query;
+    //echo $extra_query;
     $valid = function ($key, $current) use ($project, $start, & $idx, $search, $query, $extra_query, $keys, $items_on_page) {
         if(isset($project) && !empty($project))
             return $project == $key;
@@ -326,7 +321,7 @@ function excel_database_navigation_links($page_url, $query, $page_no, $items_on_
             $link .= '&'.urlencode(add_query_key_prefix($key))."=".urlencode($value);
         }
     } else {
-	    $link = $page_url.'/search/query='.urlencode($query);
+	    $link = $page_url.'/?search=1&query='.urlencode($query);
     }
     $extra_keys = get_option('excel_database_extra_search_keys');
     for ($i=0;  $i<$extra_keys; $i++) {
