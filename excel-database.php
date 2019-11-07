@@ -29,7 +29,6 @@ defined('ABSPATH') or die('Unauthorized access!');
 require_once __DIR__.'/spout/src/Spout/Autoloader/autoload.php';
 use Box\Spout\Reader\Common\Creator\ReaderEntityFactory;
 
-add_action( 'init', 'excel_database_rewrite_rule');
 add_shortcode( 'excel_database', 'excel_database_shortcode' );
 add_shortcode( 'excel_database_search', 'excel_database_search_shortcode' );
 add_shortcode( 'excel_database_advanced_search', 'excel_database_advanced_search_shortcode' );
@@ -62,6 +61,9 @@ function add_query_key_prefix($key) {
     return "ed_".$key;
 }
 
+/*
+add_action( 'init', 'excel_database_rewrite_rule');
+
 function excel_database_rewrite_rule() {
     $page = get_option('excel_database_page');
     $page_id = get_option('excel_database_page_id');
@@ -74,6 +76,7 @@ function excel_database_rewrite_rule() {
         flush_rewrite_rules();
     }
 }
+*/
 
 function excel_database_extra_search_keys(){
     $result = array();
@@ -123,8 +126,8 @@ function excel_database_extra_search_fields() {
 }
 
 function excel_database_search_shortcode( $atts ){
-    $page = get_option('excel_database_page');
-    $page_url = get_site_url(null,'/'.urlencode($page));
+    $page = get_option('excel_database_page_id');
+    $page_url = get_site_url();
     $search_form =  '<form role="search" method="get" id="excel_database_search"'."\n\t".
                 'class="search-form" action="'.$page_url.'">'."\n\t".
             '<label>'."\n\t\t".
@@ -133,7 +136,8 @@ function excel_database_search_shortcode( $atts ){
             '</label>'."\n\t";
     $search_form .= excel_database_extra_search_fields();
     $search_form .= 
-                '<input type="hidden" value="1" name="search"/>'."\n\t".
+            '<input type="hidden" value="1" name="search"/>'."\n\t".
+            '<input type="hidden" name="page_id" value="'.$page.'"/>'."\n\t".
             '<input type="submit" class="search-submit"'."\n\t\t".
                 'value="Search database" />'."\n\t".
             '</form>'."\n";
@@ -142,8 +146,8 @@ function excel_database_search_shortcode( $atts ){
 
 
 function excel_database_advanced_search_shortcode( $atts ){
-    $page = get_option('excel_database_page');
-    $page_url = get_site_url(null,'/'.urlencode($page));
+    $page = get_option('excel_database_page_id');
+    $page_url = get_site_url();
     $keys = array(); $description = array();
     $fcount = excel_database_read_description($keys, $description);
     $out =  '<form role="search" method="get" id="excel_database_advanced_search"'."\n\t".
@@ -160,6 +164,7 @@ function excel_database_advanced_search_shortcode( $atts ){
     $out .= excel_database_extra_search_fields();
     $out .=
             '<input type="hidden" value="1" name="advanced_search"/>'."\n\t".
+            '<input type="hidden" name="page_id" value="'.$page.'"/>'."\n\t".
             '<input type="submit" class="search-submit"'."\n\t\t".
                 'value="Search database" />'."\n\t".
             '</form>'."\n";
@@ -169,10 +174,10 @@ function excel_database_advanced_search_shortcode( $atts ){
 //[foobar]
 function excel_database_shortcode( $atts ){
     $primary_key_idx = get_option('excel_database_primary') - 1;
-    $page = get_option('excel_database_page');
+    $page = get_option('excel_database_page_id');
     $items_on_page = get_option('excel_database_items_on_page');
     if (empty($items_on_page)) $items_on_page = 10;
-    $page_url = get_site_url(null,'/'.urlencode($page));
+    $page_url = get_site_url(null,'/?page_id='.urlencode($page));
 
     $project = get_query_var( 'item' );
     $search = get_query_var( 'search' );
@@ -265,7 +270,7 @@ function excel_database_shortcode( $atts ){
     $out .= $navigation_links;
     foreach ($entries as $key => $current) {
         if (!$single) {
-            $href = get_site_url(null,'/'.urlencode($page).'/item/'.urlencode($key));
+            $href = $page_url.'&item='.urlencode($key);
         } else {
             $href = null;
         }
@@ -316,12 +321,12 @@ function excel_database_navigation_links($page_url, $query, $page_no, $items_on_
     $out = "";
     if ($idx <= $items_on_page) return $out;
     if (is_array($query)) {
-        $link = $page_url.'/?advanced_search=1';
+        $link = $page_url.'&advanced_search=1';
         foreach ($query as $key => $value) {
             $link .= '&'.urlencode(add_query_key_prefix($key))."=".urlencode($value);
         }
     } else {
-	    $link = $page_url.'/?search=1&query='.urlencode($query);
+	    $link = $page_url.'&search=1&query='.urlencode($query);
     }
     $extra_keys = get_option('excel_database_extra_search_keys');
     for ($i=0;  $i<$extra_keys; $i++) {
