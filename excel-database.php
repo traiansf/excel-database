@@ -31,11 +31,15 @@ use Box\Spout\Reader\Common\Creator\ReaderEntityFactory;
 
 add_shortcode( 'excel_database', 'excel_database_shortcode' );
 add_shortcode( 'excel_database_search', 'excel_database_search_shortcode' );
+add_shortcode( 'ed_key', 'excel_database_key_shortcode' );
 add_shortcode( 'excel_database_advanced_search', 'excel_database_advanced_search_shortcode' );
 if ( is_admin() ){ // admin actions
     add_action( 'admin_menu', 'excel_database_menu' );
     add_action( 'admin_init', 'register_excel_database_settings' );
 }
+
+$excel_database_current_values = array();
+$excel_database_keys = array();
 
 add_filter( 'query_vars', 'excel_database_add_query' );
 function excel_database_add_query( $vars )
@@ -144,6 +148,20 @@ function excel_database_search_shortcode( $atts ){
     return $search_form;
 }
 
+function excel_database_key_shortcode( $atts, $content ){
+    global $excel_database_current_values;
+    $hkey = $atts['k'];
+    $value = excel_database_get_value($excel_database_current_values, $hkey);
+    if (empty($value)) return "";
+    $content = str_replace('{{'.$hkey.'}}', $value, $content);
+/*
+    if (!empty($href)) {
+        $href = substr($href,strlen("http://"));
+        $template = str_replace('{{href}}', $href, $template);
+    }
+*/
+    return apply_filters( 'the_content', $content );
+}
 
 function excel_database_advanced_search_shortcode( $atts ){
     $page = get_option('excel_database_page_id');
@@ -169,6 +187,14 @@ function excel_database_advanced_search_shortcode( $atts ){
                 'value="Search database" />'."\n\t".
             '</form>'."\n";
     return $out;
+}
+
+function canShow($item) {
+    return 
+        ( !is_array( $item ) ) &&
+        ( ( !is_object( $item ) && settype( $item, 'string' ) !== false ) ||
+            ( is_object( $item ) && method_exists( $item, '__toString' ) ) )
+        ;
 }
 
 //[foobar]
@@ -304,6 +330,7 @@ function excel_database_default_format($keys, $description, $fieldcount, $count,
 }
 
 function excel_database_template_format($keys, $fieldcount, $template, $current, $href) {
+    global $excel_database_current_values;
     for ($i = 0; $i < $fieldcount; $i++) {
         $hkey = $keys[$i];
         $value = excel_database_get_value($current, $hkey);
@@ -314,6 +341,7 @@ function excel_database_template_format($keys, $fieldcount, $template, $current,
         $href = substr($href,strlen("http://"));
         $template = str_replace('{{href}}', $href, $template);
     }
+    $excel_database_current_values = $current;
     return apply_filters( 'the_content', $template );
 }
 
@@ -364,6 +392,9 @@ function excel_database_read_description(& $keys, & $description) {
 function excel_database_read($primary_key_idx, & $keys, & $description, & $entries) {
     $upload_dir = wp_upload_dir();
     $db_url = get_option('excel_database_url');
+    if (empty($db_url)) {
+        return 0;
+    }
     $db_file = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $db_url);
 
     $reader = ReaderEntityFactory::createReaderFromFile($db_file);
